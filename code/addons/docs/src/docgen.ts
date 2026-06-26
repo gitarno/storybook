@@ -1,23 +1,21 @@
-import type { DocgenProviderPreset } from 'storybook/internal/types';
+import { fileURLToPath } from 'node:url';
+
+import type { DocgenProviderDescriptor } from 'storybook/internal/types';
 
 /**
  * Addon-docs docgen provider.
  *
- * A small enrichment layer: appends a `(docs enabled)` marker to the downstream description so
- * consumers can tell that addon-docs participated. Does NOT produce docgen on its own — when no
- * downstream provider supplied a payload it returns undefined so the chain falls through.
+ * Contributes a {@link DocgenProviderDescriptor} pointing at {@link ./docgen-worker.ts}, appended to
+ * the accumulated array so it composes on top of the renderer's provider inside core's docgen worker.
+ * The actual enrichment runs off the main thread; this preset only resolves the worker module path.
  */
-export const experimental_docgenProvider: DocgenProviderPreset = async (nextDocgen) => {
-  return async (input) => {
-    const downstream = await nextDocgen(input);
-    if (!downstream) {
-      return undefined;
-    }
-    return {
-      ...downstream,
-      description: downstream.description
-        ? `${downstream.description} (docs enabled)`
-        : 'docs enabled',
-    };
-  };
-};
+export const experimental_docgenProvider = async (
+  existing: DocgenProviderDescriptor[] = []
+): Promise<DocgenProviderDescriptor[]> => [
+  ...existing,
+  {
+    moduleSpecifier: fileURLToPath(
+      import.meta.resolve('@storybook/addon-docs/internal/docgen-worker')
+    ),
+  },
+];

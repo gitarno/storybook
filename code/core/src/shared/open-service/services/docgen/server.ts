@@ -16,7 +16,7 @@ import type { ModuleGraphService } from '../module-graph/definition.ts';
 import { toStoryIndexPath } from '../module-graph/types.ts';
 import { storyDocsServiceDef } from '../story-docs/definition.ts';
 import type { StoryDocsProvider } from '../story-docs/types.ts';
-import { docgenServiceDef } from './definition.ts';
+import { type DocgenService, docgenServiceDef } from './definition.ts';
 import type { DocgenProvider } from './types.ts';
 
 /** Extraction services key provider-extracted payloads by component id under `components`. */
@@ -215,8 +215,9 @@ export type RegisterDocgenServicesOptions = {
    */
   getIndex: () => Promise<StoryIndex>;
   /**
-   * Fully composed docgen provider chain from `presets.apply('experimental_docgenProvider', ...)`.
-   * Omit to skip registering the `core/docgen` service.
+   * Extraction function for one component, typically forwarding to the docgen worker. Receives the
+   * resolved index entry and returns the payload (or undefined when nothing was produced). Omit to
+   * skip registering the `core/docgen` service.
    */
   docgenProvider?: DocgenProvider;
   /**
@@ -225,7 +226,35 @@ export type RegisterDocgenServicesOptions = {
    * `core/story-docs` service.
    */
   storyDocsProvider?: StoryDocsProvider;
+  /**
+   * When true, eagerly extract the first eligible component after registration (fire-and-forget).
+   * This warms the worker's TypeScript program off the main thread and persists the result into
+   * docgen state so the first visited story's Controls populate without a cold program build.
+   */
+  warmFirstComponent?: boolean;
 };
+
+/**
+ * Fire-and-forget extraction of the first eligible component, used to warm the docgen worker. The
+ * result is stored in docgen state by the `extractDocgen` command, so visiting that story later is
+ * instant. Errors (missing TypeScript, parse failures) are swallowed — warming is best-effort.
+ */
+async function warmFirstDocgenComponent(
+  docgen: DocgenService,
+  getIndex: () => Promise<StoryIndex>
+): Promise<void> {
+  try {
+    const entries = selectComponentEntriesByComponentId(Object.values((await getIndex()).entries));
+    for (const [id, entry] of entries) {
+      if (getStoryImportPathFromEntry(entry)) {
+        await docgen.commands.extractDocgen({ id });
+        return;
+      }
+    }
+  } catch {
+    // Best-effort: missing TypeScript, parse failures, or a disposed worker are all non-fatal here.
+  }
+}
 
 /**
  * Registers the docgen open services (`core/docgen` and `core/story-docs`) against the process-global
@@ -247,6 +276,10 @@ export function registerDocgenServices(options: RegisterDocgenServicesOptions) {
         extractAllCommand: 'extractAllDocgen',
       })
     : undefined;
+
+  if (docgen && options.warmFirstComponent) {
+    void warmFirstDocgenComponent(docgen, options.getIndex);
+  }
 
   const storyDocs = options.storyDocsProvider
     ? registerExtractionService(storyDocsServiceDef, {

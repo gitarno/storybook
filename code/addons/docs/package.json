@@ -58,6 +58,7 @@
       "code": "./src/ember/index.ts",
       "default": "./dist/ember/index.js"
     },
+    "./internal/docgen-worker": "./dist/docgen-worker.js",
     "./manager": "./dist/manager.js",
     "./mdx-loader": "./dist/mdx-loader.js",
     "./mdx-react-shim": {
